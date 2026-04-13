@@ -25,14 +25,18 @@ L   = 100.0      # domain length
 N   = 256        # number of grid points
 dx  = L / N      # grid spacing
  
-a   = 0.94       # source term for w
+a   = 2.0    # source term for w
 m   = 0.45       # decay rate for n
-v   = 45.625     # advection velocity for w (can be negative)
+v   = 182.5      # advection velocity for w (can be negative)
+dw  = 1.0          # diffusion coefficient for w
 D   = 1.0        # diffusion coefficient for n (multiplies the Laplacian)
  
-T   = 20.0      # total simulation time
+T   = 100.0      # total simulation time
 dt  = 0.0002      # time step  (must satisfy CFL and diffusion stability)
 n_steps = int(T / dt)
+
+n_eq = (a - np.sqrt((a + 2.*m)*(a -2.*m)))/(2.*m)
+w_eq = a / (1.0 + (n_eq*n_eq))
  
 # Stability checks (print warnings if violated)
 cfl     = abs(v) * dt / dx
@@ -50,8 +54,10 @@ rng = np.random.default_rng(42)
 #w = np.full(N, a) + 0.01 * rng.standard_normal(N)
 #n = np.full(N, 0.1) + 0.01 * rng.standard_normal(N)
 
-w = np.zeros(N) +1
-n = ((np.random.rand(N))<0.05)*1 + 1
+w = w_eq + ((rng.random(N))<0.02)
+n = n_eq+ ((rng.random(N))<0.02)*1 
+print("n_eq = ", n_eq)
+print("w_eq = ", w_eq)
 #w = np.clip(w, 0, None)
 #n = np.clip(n, 0, None)
  
@@ -86,9 +92,11 @@ for step in range(n_steps + 1):
  
     # Central difference for d²n/dx²
     d2n_dx2 = (n[idx_f] - 2*n + n[idx_b]) / dx**2
+    d2w_dx2 = (w[idx_f] - 2*w + w[idx_b]) / dx**2
+    
  
     # ── RHS ─────────────────────────────────────────────────────────────────
-    dw_dt = a - w - w * n**2 + v * dw_dx
+    dw_dt = a - w - w * n**2 - v * dw_dx #+ dw*d2w_dx2
     dn_dt = w * n**2 - m * n + D * d2n_dx2
  
     # ── Euler step ──────────────────────────────────────────────────────────
@@ -129,6 +137,8 @@ plt.tight_layout()
 plt.savefig(r"C:\Users\Jasper\Desktop\advanced modelling\spacetime_wn.png", dpi=150)
 print("Saved space-time diagram -> spacetime_wn.png") 
 plt.show()
+print(w)
+print(n)
 
 # # ── Static plot: space-time diagram ─────────────────────────────────────────
 # fig, axes = plt.subplots(1, 2, figsize=(14, 5))
