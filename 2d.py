@@ -1,22 +1,22 @@
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import sys
+from matplotlib.colors import LinearSegmentedColormap
 sys.stdout.reconfigure(encoding='utf-8')
 
 # -- Parameters ---------------------------------------------------------------
-Lx  = 200.0
-Ly  = 200.0
-Nx  = 2*128
-Ny  = 2*128
+Lx  = 100.0
+Ly  = 100.0
+Nx  = 128
+Ny  = 128
 dx  = Lx / Nx
 dy  = Ly / Ny
 
 a   = 2.0
 m   = 0.45
 vtot   = 182.5      # advection velocity for w in x-direction
-flow_dir = 1/4 * np.pi
+flow_dir = 0 * np.pi
 v = np.array([np.cos(flow_dir)*vtot, np.sin(flow_dir)*vtot])
 vx = v[0]
 vy = v[1]
@@ -110,6 +110,19 @@ for step in range(n_steps + 1):
 
 print(f"\nSimulation complete. Saved {len(snapshots_w)} snapshots.")
 
+
+sand_to_grass = LinearSegmentedColormap.from_list(
+    "sand_to_grass",
+    ["#e6d2a0", "#c2b280", "#6aa84f", "#2e7d32"]
+)
+plt.colormaps.register(sand_to_grass)
+black_to_blue = LinearSegmentedColormap.from_list(
+    "black_to_blue",
+    ["#000000", "#1f77ff"]  
+)
+plt.colormaps.register(black_to_blue)
+
+
 snapshots_w = np.array(snapshots_w)
 snapshots_n = np.array(snapshots_n)
 times       = np.array(times)
@@ -123,7 +136,7 @@ fig.suptitle("2D PDE simulation  —  w (top) and n (bottom)", fontsize=12)
 
 for col, fi in enumerate(frames_to_plot):
     im0 = axes[0, col].imshow(snapshots_w[fi], origin="lower",
-                               extent=[0, Lx, 0, Ly], cmap="inferno",
+                               extent=[0, Lx, 0, Ly], cmap="black_to_blue",
                                vmin=w_min, vmax=w_max)
     axes[0, col].set_title(f"w,  t = {times[fi]:.1f}")
     axes[0, col].set_xlabel("x")
@@ -131,7 +144,7 @@ for col, fi in enumerate(frames_to_plot):
     plt.colorbar(im0, ax=axes[0, col])
 
     im1 = axes[1, col].imshow(snapshots_n[fi], origin="lower",
-                               extent=[0, Lx, 0, Ly], cmap="viridis", vmin = n_min, vmax = n_max)
+                               extent=[0, Lx, 0, Ly], cmap="sand_to_grass", vmin = n_min, vmax = n_max)
     axes[1, col].set_title(f"n,  t = {times[fi]:.1f}")
     axes[1, col].set_xlabel("x")
     axes[1, col].set_ylabel("y")
@@ -146,13 +159,13 @@ fig2, (ax_w, ax_n) = plt.subplots(1, 2, figsize=(12, 5))
 fig2.suptitle("2D simulation", fontsize=11)
 
 im_w = ax_w.imshow(snapshots_w[0], origin="lower", extent=[0, Lx, 0, Ly],
-                   cmap="inferno", vmin=w_min, vmax=w_max, animated=True)
+                   cmap="black_to_blue", vmin=w_min, vmax=w_max, animated=True)
 ax_w.set_title("w  (activator)")
 ax_w.set_xlabel("x"); ax_w.set_ylabel("y")
 plt.colorbar(im_w, ax=ax_w)
 
 im_n = ax_n.imshow(snapshots_n[0], origin="lower", extent=[0, Lx, 0, Ly],
-                   cmap="viridis", vmin=n_min, vmax= n_max, animated=True)
+                   cmap="sand_to_grass", vmin=n_min, vmax= n_max, animated=True)
 ax_n.set_title("n  (inhibitor)")
 ax_n.set_xlabel("x"); ax_n.set_ylabel("y")
 plt.colorbar(im_n, ax=ax_n)
