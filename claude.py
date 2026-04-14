@@ -35,7 +35,7 @@ T   = 100.0      # total simulation time
 dt  = 0.0002      # time step  (must satisfy CFL and diffusion stability)
 n_steps = int(T / dt)
 
-n_eq = (a - np.sqrt((a + 2.*m)*(a -2.*m)))/(2.*m)
+n_eq = (a + np.sqrt((a + 2.*m)*(a -2.*m)))/(2.*m)
 w_eq = a / (1.0 + (n_eq*n_eq))
  
 # Stability checks (print warnings if violated)
@@ -54,12 +54,11 @@ rng = np.random.default_rng(42)
 #w = np.full(N, a) + 0.01 * rng.standard_normal(N)
 #n = np.full(N, 0.1) + 0.01 * rng.standard_normal(N)
 
+# Small random perturbations around a homogeneous steady state
 w = w_eq + ((rng.random(N))<0.02)
-n = n_eq+ ((rng.random(N))<0.02)*1 
+n = n_eq+ ((rng.random(N))<0.02)
 print("n_eq = ", n_eq)
 print("w_eq = ", w_eq)
-#w = np.clip(w, 0, None)
-#n = np.clip(n, 0, None)
  
 # ── Helper: periodic index arrays ────────────────────────────────────────────
 idx_p = np.arange(N)          # i
@@ -137,8 +136,6 @@ plt.tight_layout()
 plt.savefig(r"C:\Users\Jasper\Desktop\advanced modelling\spacetime_wn.png", dpi=150)
 print("Saved space-time diagram -> spacetime_wn.png") 
 plt.show()
-print(w)
-print(n)
 
 # # ── Static plot: space-time diagram ─────────────────────────────────────────
 # fig, axes = plt.subplots(1, 2, figsize=(14, 5))
