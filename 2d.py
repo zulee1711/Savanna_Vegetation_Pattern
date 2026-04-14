@@ -3,13 +3,14 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import sys
 from matplotlib.colors import LinearSegmentedColormap
+from numba import njit
 sys.stdout.reconfigure(encoding='utf-8')
 
 # -- Parameters ---------------------------------------------------------------
-Lx  = 100.0
-Ly  = 100.0
-Nx  = 128
-Ny  = 128
+Lx  = 250.0
+Ly  = 250.0
+Nx  = 250
+Ny  = 250
 dx  = Lx / Nx
 dy  = Ly / Ny
 
@@ -20,11 +21,13 @@ flow_dir = 0 * np.pi
 v = np.array([np.cos(flow_dir)*vtot, np.sin(flow_dir)*vtot])
 vx = v[0]
 vy = v[1]
+vx = np.full((Ny, Nx), vx, dtype=np.float64)
+vy = np.full((Ny, Nx), vy, dtype=np.float64)
 D   = 1.0        # diffusion coefficient for n
 dw = 0.1
 
-T       = 100.0
-dt      = 0.001
+T       = 1000.0
+dt      = 0.003
 n_steps = int(T / dt)
 
 n_eq = (a + np.sqrt((a + 2.*m)*(a - 2.*m))) / (2.*m)
@@ -49,10 +52,15 @@ n = n_eq + (rng.random((Ny, Nx)) < 0.02).astype(float)
 #n = 0 + (rng.random((Ny, Nx)) < 0.02).astype(float)
 
 # -- Periodic index arrays ----------------------------------------------------
-ixf = (np.arange(Nx) + 1) % Nx   # x forward
-ixb = (np.arange(Nx) - 1) % Nx   # x backward
-iyf = (np.arange(Ny) + 1) % Ny   # y forward
-iyb = (np.arange(Ny) - 1) % Ny   # y backward
+ixf = np.arange(Nx, dtype=np.int64)
+ixb = np.arange(Nx, dtype=np.int64)
+iyf = np.arange(Ny, dtype=np.int64)
+iyb = np.arange(Ny, dtype=np.int64)
+
+ixf = (ixf + 1) % Nx
+ixb = (ixb - 1) % Nx
+iyf = (iyf + 1) % Ny
+iyb = (iyb - 1) % Ny
 
 # -- Time integration ---------------------------------------------------------
 save_every = 500
@@ -60,53 +68,82 @@ snapshots_w = []
 snapshots_n = []
 times       = []
 
+@njit
+def step_pde(w, n, vx, vy, dx, dy, dt, a, m, dw, D,
+             ixf, ixb, iyf, iyb):
+
+    Ny, Nx = w.shape
+
+    w_new = w.copy()
+    n_new = n.copy()
+
+    for j in range(Ny):
+        for i in range(Nx):
+
+            # periodic indices
+            ip = ixf[i]
+            im = ixb[i]
+            jp = iyf[j]
+            jm = iyb[j]
+
+            # upwind derivatives for w
+            if vx[j, i] >= 0:
+                dw_dx = (w[j, i] - w[j, im]) / dx
+            else:
+                dw_dx = (w[j, ip] - w[j, i]) / dx
+
+            if vy[j, i] >= 0:
+                dw_dy = (w[j, i] - w[jm, i]) / dy
+            else:
+                dw_dy = (w[jp, i] - w[j, i]) / dy
+
+            # Laplacian w
+            lap_w = (
+                (w[j, ip] - 2.0*w[j, i] + w[j, im]) / (dx*dx) +
+                (w[jp, i] - 2.0*w[j, i] + w[jm, i]) / (dy*dy)
+            )
+
+            # Laplacian n
+            lap_n = (
+                (n[j, ip] - 2.0*n[j, i] + n[j, im]) / (dx*dx) +
+                (n[jp, i] - 2.0*n[j, i] + n[jm, i]) / (dy*dy)
+            )
+
+            # PDEs
+            w_new[j, i] = w[j, i] + dt * (
+                a - w[j, i] - w[j, i]*n[j, i]**2
+                - vx[j, i]*dw_dx - vy[j, i]*dw_dy
+                + dw * lap_w
+            )
+
+            n_new[j, i] = n[j, i] + dt * (
+                w[j, i]*n[j, i]**2 - m*n[j, i]
+                + D * lap_n
+            )
+
+    return w_new, n_new
+
 for step in range(n_steps + 1):
+    if step % 500 == 0:
+        print(str(step*dt) + "/" +str(T))
 
     if step % save_every == 0:
         snapshots_w.append(w.copy())
         snapshots_n.append(n.copy())
         times.append(step * dt)
-        print(f"  t = {step * dt:.2f} / {T}", end="\r")
 
     if step == n_steps:
         break
 
-    # upwind dw/dx (advection in x only)
-    if vx <= 0:
-        dw_dx = (w - w[:, ixb]) / dx
-    else:
-        dw_dx = (w[:, ixf] - w) / dx
-    
-    if vy <= 0:
-        dw_dy = (w - w[iyb, :]) / dy
-    else:
-        dw_dy = (w[iyf, :] - w) / dy
-    
-    
-        
-    #dw_dx = (w[:,ixf] - w[:, ixb])/ dx
-
-    # 2D Laplacian with central differences
-    laplacian_n = (
-        (n[:, ixf] - 2*n + n[:, ixb]) / dx**2 +
-        (n[iyf, :] - 2*n + n[iyb, :]) / dy**2
-    )
-    laplacian_w = (
-        (w[:, ixf] - 2*w + w[:, ixb]) / dx**2 +
-        (w[iyf, :] - 2*w + w[iyb, :]) / dy**2
+    w, n = step_pde(
+        w, n, vx, vy,
+        dx, dy, dt,
+        a, m, dw, D,
+        ixf, ixb, iyf, iyb
     )
 
-    dw_dt = a - w - w * n**2 + vx * dw_dx + vy *dw_dy #+ dw*laplacian_w
-    dn_dt = w * n**2 - m * n + D * laplacian_n
-
-    w = w + dt * dw_dt
-    n = n + dt * dn_dt
     w = np.clip(w, 0, 1e6)
     n = np.clip(n, 0, 1e6)
-
-    if np.any(np.isnan(w)) or np.any(np.isnan(n)):
-        print(f"\nNaN detected at step {step} (t={step*dt:.3f}). Stopping.")
-        break
 
 print(f"\nSimulation complete. Saved {len(snapshots_w)} snapshots.")
 
@@ -126,7 +163,7 @@ plt.colormaps.register(black_to_blue)
 snapshots_w = np.array(snapshots_w)
 snapshots_n = np.array(snapshots_n)
 times       = np.array(times)
-w_min, w_max = snapshots_w[100:].min(), snapshots_w[100:].max()
+w_min, w_max = snapshots_w[15:].min(), snapshots_w[15:].max()
 n_min, n_max = snapshots_n.min(), snapshots_n.max()
 
 # -- Static plots: first, middle, last snapshots ------------------------------
