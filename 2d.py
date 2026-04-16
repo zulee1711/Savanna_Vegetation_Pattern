@@ -7,10 +7,10 @@ from numba import njit
 sys.stdout.reconfigure(encoding='utf-8')
 
 # -- Parameters ---------------------------------------------------------------
-Lx  = 250.0
-Ly  = 250.0
-Nx  = 250
-Ny  = 250
+Lx  = 100.0
+Ly  = 100.0
+Nx  = 100
+Ny  = 100
 dx  = Lx / Nx
 dy  = Ly / Ny
 
@@ -24,10 +24,10 @@ vy = v[1]
 vx = np.full((Ny, Nx), vx, dtype=np.float64)
 vy = np.full((Ny, Nx), vy, dtype=np.float64)
 D   = 1.0        # diffusion coefficient for n
-dw = 0.1
+dw = 0
 
-T       = 1000.0
-dt      = 0.003
+T       = 200.0
+dt      = 0.002
 n_steps = int(T / dt)
 
 n_eq = (a + np.sqrt((a + 2.*m)*(a - 2.*m))) / (2.*m)
@@ -68,7 +68,7 @@ snapshots_w = []
 snapshots_n = []
 times       = []
 
-@njit
+@njit(parallel=True)
 def step_pde(w, n, vx, vy, dx, dy, dt, a, m, dw, D,
              ixf, ixb, iyf, iyb):
 
@@ -87,12 +87,12 @@ def step_pde(w, n, vx, vy, dx, dy, dt, a, m, dw, D,
             jm = iyb[j]
 
             # upwind derivatives for w
-            if vx[j, i] >= 0:
+            if vx[j, i] <= 0:
                 dw_dx = (w[j, i] - w[j, im]) / dx
             else:
                 dw_dx = (w[j, ip] - w[j, i]) / dx
 
-            if vy[j, i] >= 0:
+            if vy[j, i] <= 0:
                 dw_dy = (w[j, i] - w[jm, i]) / dy
             else:
                 dw_dy = (w[jp, i] - w[j, i]) / dy
@@ -112,7 +112,7 @@ def step_pde(w, n, vx, vy, dx, dy, dt, a, m, dw, D,
             # PDEs
             w_new[j, i] = w[j, i] + dt * (
                 a - w[j, i] - w[j, i]*n[j, i]**2
-                - vx[j, i]*dw_dx - vy[j, i]*dw_dy
+                + vx[j, i]*dw_dx + vy[j, i]*dw_dy
                 + dw * lap_w
             )
 
@@ -165,6 +165,8 @@ snapshots_n = np.array(snapshots_n)
 times       = np.array(times)
 w_min, w_max = snapshots_w[15:].min(), snapshots_w[15:].max()
 n_min, n_max = snapshots_n.min(), snapshots_n.max()
+n_min = 0
+w_min = 0
 
 # -- Static plots: first, middle, last snapshots ------------------------------
 frames_to_plot = [0, len(times)//2, -1]
@@ -193,6 +195,9 @@ print("Saved snapshots -> snapshots_2d.png")
 
 # -- Animation ----------------------------------------------------------------
 fig2, (ax_w, ax_n) = plt.subplots(1, 2, figsize=(12, 5))
+#fig2.patch.set_alpha(0)
+#ax_w.set_facecolor((0, 0, 0, 0))
+#ax_n.set_facecolor((0, 0, 0, 0))
 fig2.suptitle("2D simulation", fontsize=11)
 
 im_w = ax_w.imshow(snapshots_w[0], origin="lower", extent=[0, Lx, 0, Ly],
@@ -207,8 +212,8 @@ ax_n.set_title("n  (inhibitor)")
 ax_n.set_xlabel("x"); ax_n.set_ylabel("y")
 plt.colorbar(im_n, ax=ax_n)
 
-title_w = ax_w.set_title("w  (activator), t = 0")
-title_n = ax_n.set_title("n  (inhibitor), t = 0")
+title_w = ax_w.set_title("w  (water), t = 0")
+title_n = ax_n.set_title("n  (biomass), t = 0")
 def update(frame):
     im_w.set_data(snapshots_w[frame])
     im_n.set_data(snapshots_n[frame])
@@ -218,7 +223,11 @@ def update(frame):
 
     return im_w, im_n, title_w, title_n
 ani = animation.FuncAnimation(fig2, update, frames=len(times), interval=60, blit=False)
-ani.save("animation_2d.gif", writer="pillow", fps=20)
+ani.save("animation_2d.gif",
+         writer="pillow",
+         fps=20,
+         #savefig_kwargs={"transparent": True, "facecolor": "none"}
+)
 print("Saved animation -> animation_2d.gif")
 
 plt.show()
