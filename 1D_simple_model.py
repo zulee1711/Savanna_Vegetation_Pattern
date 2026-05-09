@@ -78,9 +78,6 @@ for step in range(n_steps + 1):
         snapshots_n.append(n.copy())
         times.append(step * dt)
  
-    if step == n_steps:
-        break
- 
     # ── Spatial derivatives ──────────────────────────────────────────────────
  
     # Upwind scheme for dw/dx  (first-order upwind)
@@ -99,10 +96,17 @@ for step in range(n_steps + 1):
     dn_dt = w * n**2 - m * n + D * d2n_dx2
  
     # ── Euler step ──────────────────────────────────────────────────────────
-    w = w + dt * dw_dt
-    n = n + dt * dn_dt
-    w = np.clip(w, 0, 1e6)
-    n = np.clip(n, 0, 1e6)
+    w_new = w + dt * dw_dt
+    n_new = n + dt * dn_dt
+    w_new = np.clip(w_new, 0, 1e6)
+    n_new = np.clip(n_new, 0, 1e6)
+
+    if (np.linalg.norm(n_new) - np.linalg.norm(n) < 1e-6) or step == n_steps:
+        print("Broke at t = ", step * dt)
+        break
+
+    w = w_new 
+    n = n_new 
  
     if np.any(np.isnan(w)) or np.any(np.isnan(n)):
         print(f"NaN detected at step {step} (t={step*dt:.3f}). Stopping.")

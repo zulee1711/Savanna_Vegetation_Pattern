@@ -32,9 +32,9 @@ dw  = 1.0          # diffusion coefficient for w
 D   = 1.0        # diffusion coefficient for n (multiplies the Laplacian)
  
 T   = 100.0      # total simulation time
-dt  = 0.0002      # time step  (must satisfy CFL and diffusion stability)
+dt  = 0.001      # time step  (must satisfy CFL and diffusion stability)
 n_steps = int(T / dt)
-a_max = 2.5
+a_max = 2.0
 a_min = 0.0
 # a_range = np.arange(a_min, a_max, 0.5)
 a_range = np.linspace(a_min, a_max,100)
@@ -61,7 +61,7 @@ n_max = np.zeros(len(a_range))
 initial_conditions = {"non-zero eq": {"n_average": np.zeros(len(a_range)), "n_max": np.zeros(len(a_range))}, 
                       "zero eq": {"n_average":  np.zeros(len(a_range)), "n_max": np.zeros(len(a_range))}}
 plt.figure()
-rng = np.random.default_rng(42)
+rng = np.random.default_rng(100)
 
 for ic_name, ic_results in initial_conditions.items(): 
 
@@ -71,8 +71,8 @@ for ic_name, ic_results in initial_conditions.items():
 
         # Non-zero equilibirum 
         if a < 2*m: 
-            n_eq = 0
-            w_eq = a
+            n_eq = 2
+            w_eq = 0.3
         else: 
             n_eq = (a + np.sqrt((a + 2.*m)*(a -2.*m)))/(2.*m)
             w_eq = a / (1.0 + (n_eq*n_eq))
@@ -81,11 +81,11 @@ for ic_name, ic_results in initial_conditions.items():
 
 
         if ic_name == "zero eq": 
-            w = a + ((rng.random(N))<0.05)
-            n = 0 + ((rng.random(N))<0.05)
+            w = a + ((rng.random(N))<0.005)
+            n = 0 + ((rng.random(N))<0.005)
         else: 
-            w = w_eq + ((rng.random(N))<0.05)
-            n = n_eq+ ((rng.random(N))<0.05)
+            w = w_eq + ((rng.random(N))<0.005)
+            n = n_eq+ ((rng.random(N))<0.005)
 
         # ── Time integration ─────────────────────────────────────────────────────────
         save_every = 100               # save a snapshot every this many steps
@@ -113,7 +113,7 @@ for ic_name, ic_results in initial_conditions.items():
             d2w_dx2 = (w[idx_f] - 2*w + w[idx_b]) / dx**2
             
             # ── RHS ─────────────────────────────────────────────────────────────────
-            dw_dt = a - w - w * n**2 - v * dw_dx #+ dw*d2w_dx2
+            dw_dt = a - w - w * n**2 - v * dw_dx # + dw*d2w_dx2
             dn_dt = w * n**2 - m * n + D * d2n_dx2
         
             # ── Euler step ──────────────────────────────────────────────────────────
@@ -123,8 +123,10 @@ for ic_name, ic_results in initial_conditions.items():
             w_new = np.clip(w_new, 0, 1e6)
             n_new = np.clip(n_new, 0, 1e6)
 
-            if (np.linalg.norm(n_new) - np.linalg.norm(n) < 1e-6) or step == n_steps:
-                break
+            if step % 100 == 0:
+                change = np.linalg.norm(n_new - n) + np.linalg.norm(w_new - w)
+                if change < 1e-4:
+                    break
 
             w = w_new 
             n = n_new 
@@ -143,10 +145,10 @@ for ic_name, ic_results in initial_conditions.items():
 
 plt.vlines(2*m, 0, 6, linestyles='dashed', label = "a = 2m")
 plt.xlabel("a")
-plt.title("Bifurcation Diagram")
+plt.title(f"Bifurcation Diagram, {m = }")
 plt.ylabel("n")
 plt.legend()
-plt.savefig("bifurcation_diagram.png")
+# plt.savefig("bifurcation_diagram.png", transparent = True)
 plt.show()
 
 
