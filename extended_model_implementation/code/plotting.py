@@ -138,11 +138,12 @@ def _save_or_show(fig, save_path, default_name):
 def plot_snapshot_2d(w, g, s, b, times, mesh, cfg, t_idx=-1, save_path=None):
     """
     Plots a 2D spatial heatmap of all fields at a given time index.
+    Overlays terrain if available.
 
     Inputs:
         w, g, s, b  (np.ndarray): Snapshot arrays, shape (nSnapshots, nCellsY, nCellsX)
         times       (np.ndarray): Time values, shape (nSnapshots,)
-        mesh        (Mesh2D):     Mesh object
+        mesh        (Mesh2D):     Mesh object (may contain terrain h)
         cfg         (dict):       Configuration dictionary
         t_idx       (int):        Time index to plot (-1 for last snapshot)
         save_path   (str):        Optional path to save figure
@@ -154,6 +155,13 @@ def plot_snapshot_2d(w, g, s, b, times, mesh, cfg, t_idx=-1, save_path=None):
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
     fig.suptitle(f"Extended Klausmeier — 2D snapshot at t={t:.2f}", fontsize=12)
 
+    # Normalize terrain if available
+    h_norm = None
+    if mesh.h is not None:
+        h_norm = (mesh.h - mesh.h.min()) / (mesh.h.max() - mesh.h.min() + 1e-12)
+    
+    alpha = 0.3  # Terrain overlay transparency
+
     for ax, data, label, cmap in zip(axes, arrays, _LABELS, _CMAPS):
         im = ax.imshow(
             data[t_idx],
@@ -163,6 +171,17 @@ def plot_snapshot_2d(w, g, s, b, times, mesh, cfg, t_idx=-1, save_path=None):
             vmin=0,
             vmax=max(np.nanmax(data[t_idx]), 1e-6),
         )
+        
+        # Overlay terrain if available
+        if h_norm is not None:
+            ax.imshow(
+                h_norm,
+                origin="lower",
+                extent=[0, Lx, 0, Ly],
+                cmap="Greys",
+                alpha=alpha
+            )
+        
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_title(label)
@@ -182,7 +201,15 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
     # Compute fixed color limits across all frames
     vmaxes = [max(np.nanmax(data), 1e-6) for data in arrays]
 
+    # Normalize terrain if available
+    h_norm = None
+    if mesh.h is not None:
+        h_norm = (mesh.h - mesh.h.min()) / (mesh.h.max() - mesh.h.min() + 1e-12)
+    
+    alpha = 0.3  # Terrain overlay transparency
+
     ims = []
+    h_ims = []  # Store terrain overlay images
     for ax, data, label, cmap, vmax in zip(axes, arrays, _LABELS, _CMAPS, vmaxes):
         im = ax.imshow(
             data[0],
@@ -193,11 +220,25 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
             vmax=vmax,      # ← fixed for entire animation
             animated=True,
         )
+        
+        # Add terrain overlay if available
+        h_im = None
+        if h_norm is not None:
+            h_im = ax.imshow(
+                h_norm,
+                origin="lower",
+                extent=[0, Lx, 0, Ly],
+                cmap="Greys",
+                alpha=alpha,
+                animated=True
+            )
+        
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_title(label)
         plt.colorbar(im, ax=ax)
         ims.append(im)
+        h_ims.append(h_im)
 
     title = fig.text(0.5, 0.9, "", ha="center", fontsize=10)
 
@@ -206,7 +247,7 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
             im.set_data(data[frame])
             # No set_clim — colormap is fixed
         title.set_text(f"t = {times[frame]:.2f}")
-        return ims + [title]
+        return ims + h_ims + [title]
 
     ani = animation.FuncAnimation(
         fig, update, frames=len(times), interval=40, blit=False

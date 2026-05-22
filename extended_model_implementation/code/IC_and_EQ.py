@@ -150,6 +150,84 @@ def get_initial_conditions(cfg : dict, equilibria : dict):
     return w, g, s, b # Python automatically packs as tuple 
 
 
+def make_terrain_and_velocity(cfg: dict):
+    """
+    Generate periodic rolling-hill terrain and derive spatially-varying velocity field.
+    
+    The velocity field is derived from terrain gradients (steepest descent) and capped
+    at v_max to ensure numerical stability.
+    
+    Inputs:
+        cfg (dict): Configuration dictionary containing mesh and velocity parameters
+    
+    Returns:
+        h (np.ndarray): Terrain height field, shape (nCellsY, nCellsX) for 2D or (nCells,) for 1D
+        vx (np.ndarray): x-component velocity field, same shape as h
+        vy (np.ndarray): y-component velocity field, same shape as h (None for 1D)
+    """
+    mesh_cfg = cfg['mesh']
+    terrain_cfg = cfg.get('terrain', {})
+    vel_cfg = cfg.get('velocity', {})
+    
+    # Terrain parameters
+    Nx = mesh_cfg['nCellsX'] if mesh_cfg['dim'] == 2 else mesh_cfg['nCells']
+    Ny = mesh_cfg['nCellsY'] if mesh_cfg['dim'] == 2 else 1
+    Lx = mesh_cfg['Lx'] if mesh_cfg['dim'] == 2 else mesh_cfg['L']
+    Ly = mesh_cfg['Ly'] if mesh_cfg['dim'] == 2 else mesh_cfg['L']
+    
+    n_octaves = terrain_cfg.get('n_octaves', 5)
+    amplitude_rolloff = terrain_cfg.get('amplitude_rolloff', 0.9)
+    seed = terrain_cfg.get('seed', 42)
+    v_max = vel_cfg.get('v_max', 1.0)
+    
+    # --- Generate periodic terrain via Fourier modes ---
+    rng = np.random.default_rng(seed)
+    h = np.zeros((Ny, Nx))
+    
+    for octave in range(n_octaves):
+        freq = 2 ** octave
+        amp = 1.0 / (freq ** amplitude_rolloff)
+        
+        # Random integer wavenumbers for this octave
+        size = 3
+        kx_int = rng.integers(-freq, freq + 1, size=size)
+        ky_int = rng.integers(-freq, freq + 1, size=size)
+        phases = rng.uniform(0, 2 * np.pi, size=size)
+        
+        x = np.linspace(0, Lx, Nx, endpoint=False)
+        y = np.linspace(0, Ly, Ny, endpoint=False)
+        X, Y = np.meshgrid(x, y)
+        
+        for kx_i, ky_i, phi in zip(kx_int, ky_int, phases):
+            h += amp * np.sin(2 * np.pi * kx_i * X / Lx
+                            + 2 * np.pi * ky_i * Y / Ly
+                            + phi)
+    
+    # Normalize h to [0, 1]
+    h = (h - h.min()) / (h.max() - h.min() + 1e-12)
+    
+    # --- Derive velocity field from terrain gradients ---
+    dx = Lx / Nx
+    dy = Ly / Ny
+    
+    hx, hy = np.gradient(h, dx, dy)
+    
+    # Magnitude of slope
+    slope = np.sqrt(hx**2 + hy**2)
+    slope_median = np.median(slope) + 1e-8
+    
+    # Velocity proportional to slope (steepest descent)
+    vx_raw = v_max * (hx / slope_median)
+    vy_raw = v_max * (hy / slope_median)
+    
+    # Cap velocity magnitude at v_max
+    speed = np.sqrt(vx_raw**2 + vy_raw**2)
+    scale = np.minimum(1.0, v_max / (speed + 1e-8))
+    
+    vx = vx_raw * scale
+    vy = vy_raw * scale
+    
+    return h, vx, vy
 
 
 

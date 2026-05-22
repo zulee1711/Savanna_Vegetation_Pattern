@@ -117,12 +117,12 @@ def _rhs_1d(cfg : dict, mesh : Mesh, w : np.ndarray, g : np.ndarray, s : np.ndar
 
 def _rhs_2d(cfg : dict, mesh : Mesh, w : np.ndarray, g : np.ndarray, s : np.ndarray, b : np.ndarray): 
     """
-    Computes RHS 2D 
+    Computes RHS 2D with spatially-varying velocity field (from terrain)
+    Uses upwind advection for numerical stability
     """
     m = cfg['model']
     a = m['a']
     alpha = m['alpha']
-    v = m['v']
     b1 = m['b1']
     m1 = m['m1']
     d1 = m['d1']
@@ -134,22 +134,49 @@ def _rhs_2d(cfg : dict, mesh : Mesh, w : np.ndarray, g : np.ndarray, s : np.ndar
     m3 = m['m3']
     n = g + s + b
 
+    # Use spatially-varying velocity if available, otherwise fall back to constant v
+    if mesh.vx is not None and mesh.vy is not None:
+        vx = mesh.vx
+        vy = mesh.vy
+    else:
+        # Fallback: constant velocity in x-direction
+        v = m.get('v', 0.0)
+        vx = np.full_like(w, v)
+        vy = np.zeros_like(w)
+
     # Laplacian function using central differences
     def laplacian(u): 
         d2x = (u[mesh.idxRightNeighb, :] - (2 * u[mesh.idxX, :]) + u[mesh.idxLeftNeighb, :]) / (mesh.dx**2) 
         d2y = (u[:, mesh.idxTopNeighb] - (2 * u[:, mesh.idxY]) + u[:, mesh.idxBottomNeighb]) / (mesh.dy**2) 
         return d2x + d2y
 
-    # Calculating spatial derivatives 
-    if v >= 0:
-        dw_dx = (w[:, mesh.idxRightNeighb] - w[:, mesh.idxX]) / mesh.dx
-    else:
-        dw_dx = (w[:, mesh.idxX] - w[:, mesh.idxLeftNeighb]) / mesh.dx
+    # Upwind advection for water (w) using spatially-varying velocity
+    dw_dx = np.zeros_like(w)
+    dw_dy = np.zeros_like(w)
+    
+    for j in range(mesh.nCellsY):
+        for i in range(mesh.nCellsX):
+            ip = mesh.idxRightNeighb[i]
+            im = mesh.idxLeftNeighb[i]
+            jp = mesh.idxTopNeighb[j]
+            jm = mesh.idxBottomNeighb[j]
+            
+            # x-direction: upwind based on local vx
+            if vx[j, i] >= 0:
+                dw_dx[j, i] = (w[j, ip] - w[j, i]) / mesh.dx
+            else:
+                dw_dx[j, i] = (w[j, i] - w[j, im]) / mesh.dx
+            
+            # y-direction: upwind based on local vy
+            if vy[j, i] >= 0:
+                dw_dy[j, i] = (w[jp, i] - w[j, i]) / mesh.dy
+            else:
+                dw_dy[j, i] = (w[j, i] - w[jm, i]) / mesh.dy
 
     # Calculating RHS 
-    dw = a - w - (alpha * w * n**2) + v * dw_dx
+    dw = a - w - (alpha * w * n**2) + vx * dw_dx + vy * dw_dy
     dg = (b1 * w * n * g) - (m1 * g) + (d1 * laplacian(g))
-    ds = (b2 * w * n * s) - (m2 * s) - (gamma * s) + (d2 * laplacian(b))
+    ds = (b2 * w * n * s) - (m2 * s) - (gamma * s) + (d2 * laplacian(s))
     db = (b3 * w * n * b) - (m3 * b) + (gamma * s) 
     
     return dw, dg, ds, db

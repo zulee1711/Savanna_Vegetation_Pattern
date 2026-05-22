@@ -38,7 +38,7 @@ class Mesh1D(Mesh):
 
 class Mesh2D(Mesh): 
     """ 
-    Builds 2D mesh 
+    Builds 2D mesh with optional terrain and velocity field
     """
     def __init__(self, cfg : dict): 
         self.Lx = cfg['mesh']['Lx']
@@ -63,6 +63,29 @@ class Mesh2D(Mesh):
             self.idxBottomNeighb = (self.idxY - 1) % self.nCellsY
         else: 
             raise ValueError("Cannot handle non-periodic boundary conditions")
+        
+        # Terrain and velocity fields (initialized as None, set by terrain builder)
+        self.h = None
+        self.vx = None
+        self.vy = None
+    
+    def set_terrain_and_velocity(self, h: np.ndarray, vx: np.ndarray, vy: np.ndarray):
+        """
+        Set terrain and velocity fields for this mesh.
+        
+        Inputs:
+            h (np.ndarray): Terrain height field, shape (nCellsY, nCellsX)
+            vx (np.ndarray): x-velocity field, shape (nCellsY, nCellsX)
+            vy (np.ndarray): y-velocity field, shape (nCellsY, nCellsX)
+        """
+        assert h.shape == (self.nCellsY, self.nCellsX), f"Terrain shape mismatch: got {h.shape}, expected ({self.nCellsY}, {self.nCellsX})"
+        assert vx.shape == (self.nCellsY, self.nCellsX), f"vx shape mismatch"
+        assert vy.shape == (self.nCellsY, self.nCellsX), f"vy shape mismatch"
+        
+        self.h = h
+        self.vx = vx
+        self.vy = vy
+
     
 
 

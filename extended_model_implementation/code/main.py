@@ -6,7 +6,7 @@ from pathlib import Path
 
 # Written functions in external files 
 from mesh import Mesh
-from IC_and_EQ import calculate_eq, get_initial_conditions
+from IC_and_EQ import calculate_eq, get_initial_conditions, make_terrain_and_velocity
 from simulation import simulate
 from plotting import plot_spacetime_1d, plot_snapshot_1d, animate_1d, animate_2d, plot_snapshot_2d
 
@@ -38,6 +38,23 @@ if __name__ == "__main__":
     output_dir.mkdir(parents=True, exist_ok=True)
 
     mesh = Mesh.build_from_config(cfg)
+    
+    # Generate terrain and velocity field if enabled (2D only)
+    if cfg['mesh']['dim'] == 2 and cfg['terrain'].get('enabled', False):
+        print("Generating terrain-based velocity field...")
+        h, vx, vy = make_terrain_and_velocity(cfg)
+        mesh.set_terrain_and_velocity(h, vx, vy)
+        print(f"  ✓ Terrain attached to mesh")
+        print(f"  Terrain shape: {h.shape}")
+        print(f"  Terrain range: [{h.min():.4f}, {h.max():.4f}]")
+        v_mag = np.sqrt(vx**2 + vy**2)
+        print(f"  Velocity magnitude range: [{v_mag.min():.6f}, {v_mag.max():.6f}]")
+        print(f"  Max velocity magnitude: {v_mag.max():.6f}")
+    else:
+        print(f"  ⚠ Terrain disabled (using constant velocity)")
+        print(f"    terrain.enabled = {cfg['terrain'].get('enabled')}")
+        print(f"    mesh.dim = {cfg['mesh']['dim']}")
+    
     equilibria = calculate_eq(cfg)
     IC = get_initial_conditions(cfg, equilibria)
 
