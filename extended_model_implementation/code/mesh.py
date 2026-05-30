@@ -50,7 +50,7 @@ class Mesh2D(Mesh):
 
         self.x = np.linspace(0, self.Lx, self.nCellsX, endpoint = False)
         self.y = np.linspace(0, self.Ly, self.nCellsY, endpoint = False)
-        self.xGrid, self.yGrid = np.meshgrid(self.x,self.y)
+        self.xGrid, self.yGrid = np.meshgrid(self.x,self.y, indexing='xy')
 
         if cfg['mesh']['periodic_bc']: 
             # Setting up periodic indices 
