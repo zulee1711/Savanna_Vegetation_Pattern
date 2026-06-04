@@ -1,0 +1,27 @@
+sweep:
+  name: extended_small_ecology_screen
+
+  params:
+    # Abiotic forcing
+    model.a: [1.5, 2.2, 3.0]          # rainfall: dry, intermediate, wet
+    model.v: [80.0, 180.0]            # runoff/advection: gentle vs steep-slope flow
+
+    # Whole-community water feedback
+    model.alpha: [0.6, 1.2]           # weaker vs stronger biomass-water uptake feedback
+
+    # Grass dynamics
+    model.m1: [0.30, 0.60]            # grass mortality: persistent vs stressed grass
+    model.d1: [0.5, 1.5]              # grass dispersal/spread: local vs mobile grass
+
+    # Woody recruitment and maturation
+    model.phi: [0.02, 0.10]           # tree-driven sapling recruitment / seed rain
+    model.gamma: [0.05, 0.20]         # sapling-to-tree maturation: slow vs fast
+
+    # Adult tree persistence
+    model.m3: [0.05, 0.15]            # tree mortality: long-lived vs drought-sensitive trees
+
+    # Keep sweeps lighter
+    output.save_animation: [false]
+    output.save_plot: [false]
+
+  eq_branch: E1+
