@@ -1,5 +1,5 @@
 """
-sweep.py — Parameter sweep for the improved Klausmeier model.
+sweep.py - Parameter sweep for the improved Klausmeier model.
 
 Runs the simulation for every combination of parameter values defined
 in a sweep config, saving each run to its own directory and collecting
@@ -10,8 +10,8 @@ Output structure
 outputs/
 └── <YYYYMMDD>/
     └── sweep_<sweep_name>/
-        ├── summary.csv                    ← one row per run
-        ├── a=1.0_eq=E1+/                  ← one folder per combination
+        ├── summary.csv                    <- one row per run
+        ├── a=1.0_eq=E1+/                  <- one folder per combination
         │   ├── config.yaml
         │   ├── snapshot_1d.png
         │   └── spacetime_1d.png
@@ -39,18 +39,25 @@ Run
   python sweep.py --config ../configs/extended_model.yaml
                   --sweep  ../configs/sweep_config.yaml
 """
-
 from __future__ import annotations
+
+import logging
+from logging_utils import setup_logging
+
+logger = logging.getLogger(__name__)
 
 import copy
 import csv
-import shutil
+import os
 import sys
 import time
+import traceback
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from itertools import product
 from pathlib import Path
 from typing import Any
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import yaml
@@ -68,7 +75,6 @@ from plotting import (
     plot_snapshot_2d, animate_2d,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Config helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,22 +85,13 @@ def load_yaml(path: Path) -> dict:
 
 
 def _set_nested(d: dict, dotted_key: str, value: Any) -> None:
-    """Set cfg['model']['a'] from dotted key 'model.a'."""
     keys = dotted_key.split(".")
     for k in keys[:-1]:
         d = d[k]
     d[keys[-1]] = value
 
 
-def _get_nested(d: dict, dotted_key: str) -> Any:
-    """Get cfg['model']['a'] from dotted key 'model.a'."""
-    for k in dotted_key.split("."):
-        d = d[k]
-    return d
-
-
 def apply_params(base_cfg: dict, param_values: dict[str, Any]) -> dict:
-    """Return a deep copy of base_cfg with param_values applied."""
     cfg = copy.deepcopy(base_cfg)
     for key, val in param_values.items():
         _set_nested(cfg, key, val)
@@ -102,33 +99,19 @@ def apply_params(base_cfg: dict, param_values: dict[str, Any]) -> dict:
 
 
 def run_label(param_values: dict[str, Any], sweep_cfg: dict) -> str:
-    """
-    Build a short human-readable folder name from the swept parameter values.
-    Skips simulation.eq_branch if it was set at sweep level (constant across
-    all runs, so it adds no information to the folder name).
-
-    e.g. {'model.a': 1.5, 'model.phi': 0.05} -> 'a=1.5_phi=0.05'
-    """
     sweep_eq = sweep_cfg.get("sweep", {}).get("eq_branch")
     parts = []
     for key, val in param_values.items():
         if key == "simulation.eq_branch" and sweep_eq is not None:
-            continue                             # constant — skip from label
+            continue
         short_key = key.split(".")[-1]
         parts.append(f"{short_key}={val}")
     return "_".join(parts) if parts else "run"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Output directory
-# ─────────────────────────────────────────────────────────────────────────────
-
 def sweep_root(base_cfg: dict, sweep_cfg: dict, config_path: Path) -> Path:
-    """
-    outputs/<YYYYMMDD>/sweep_<name>/
-    """
-    output_cfg  = base_cfg.get("output", {})
-    sweep_name  = sweep_cfg.get("sweep", {}).get("name", "unnamed")
+    output_cfg = base_cfg.get("output", {})
+    sweep_name = sweep_cfg.get("sweep", {}).get("name", "unnamed")
 
     base_dir = Path(str(output_cfg.get("dir", "outputs")).rstrip("/\\"))
     if not base_dir.is_absolute():
@@ -139,43 +122,48 @@ def sweep_root(base_cfg: dict, sweep_cfg: dict, config_path: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     return root
 
+def setup_worker_logging(log_path: Path) -> None:
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    file_handler = logging.FileHandler(log_path, mode="w")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    root_logger.addHandler(file_handler)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Single run
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_one(cfg: dict, run_dir: Path) -> dict:
-    """
-    Run a single simulation with the given cfg, save outputs to run_dir.
-    Returns a summary dict (one CSV row).
-    """
     output_cfg = cfg.get("output", {})
 
-    # ── mesh ──────────────────────────────────────────────────────────────────
     mesh = Mesh.build_from_config(cfg)
     if cfg["mesh"]["dim"] == 2 and cfg.get("terrain", {}).get("enabled", False):
         h, vx, vy = make_terrain_and_velocity(cfg)
         mesh.set_terrain_and_velocity(h, vx, vy)
 
-    # ── equilibria & ICs ──────────────────────────────────────────────────────
     try:
         equilibria = calculate_eq(cfg)
-        IC         = get_initial_conditions(cfg, equilibria)
+        IC = get_initial_conditions(cfg, equilibria)
     except (KeyError, ValueError) as e:
-        print(f"    Skipped — IC error: {e}")
         return {"status": f"ic_error: {e}"}
 
-    # ── simulate ───────────────────────────────────────────────────────────────
     t0 = time.perf_counter()
     w, g, s, b, times = simulate(cfg, mesh, IC)
     elapsed = time.perf_counter() - t0
 
-    # ── save config ───────────────────────────────────────────────────────────
     if output_cfg.get("save_config", True):
         with open(run_dir / "config.yaml", "w") as f:
             yaml.dump(cfg, f, default_flow_style=False)
 
-    # ── plots ─────────────────────────────────────────────────────────────────
     if output_cfg.get("save_plot", True):
         if cfg["mesh"]["dim"] == 1:
             plot_spacetime_1d(w, g, s, b, times, mesh, cfg,
@@ -186,7 +174,7 @@ def run_one(cfg: dict, run_dir: Path) -> dict:
             plot_snapshot_2d(w, g, s, b, times, mesh, cfg,
                              save_path=run_dir / "snapshot_2d.png")
 
-    if output_cfg.get("save_animation", False):   # off by default for sweeps
+    if output_cfg.get("save_animation", False):
         if cfg["mesh"]["dim"] == 1:
             animate_1d(w, g, s, b, times, mesh, cfg,
                        save_path=run_dir / "animation_1d.gif")
@@ -194,7 +182,9 @@ def run_one(cfg: dict, run_dir: Path) -> dict:
             animate_2d(w, g, s, b, times, mesh, cfg,
                        save_path=run_dir / "animation_2d.gif")
 
-    # ── summary stats (final snapshot) ────────────────────────────────────────
+    if len(times) == 0:
+        return {"status": "error: no snapshots saved"}
+
     w_f, g_f, s_f, b_f = w[-1], g[-1], s[-1], b[-1]
     return {
         "status":       "ok",
@@ -212,6 +202,43 @@ def run_one(cfg: dict, run_dir: Path) -> dict:
     }
 
 
+def worker(job: tuple[int, dict[str, Any], dict, dict, str]) -> dict:
+    """Run one parameter combination in a separate process."""
+    run_i, param_dict, base_cfg, sweep_cfg, root_str = job
+
+    root = Path(root_str)
+    label = run_label(param_dict, sweep_cfg)
+    run_dir = root / label
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    log_path = run_dir / "run.log"
+    setup_worker_logging(log_path)
+
+    try:
+        import simulation as simulation_module
+        simulation_module.tqdm = lambda iterable, *args, **kwargs: iterable
+    except Exception:
+        pass
+
+    try:
+        cfg = apply_params(base_cfg, param_dict)
+
+        # Force expensive outputs off for sweeps.
+        cfg.setdefault("output", {})
+        cfg["output"]["save_animation"] = True
+        cfg["output"]["save_plot"] = True
+
+        # Capture any remaining print() calls from old code.
+        with open(log_path, "a") as log_file, redirect_stdout(log_file), redirect_stderr(log_file):
+            results = run_one(cfg, run_dir)
+
+        return {"run": run_i, "label": label, **param_dict, **results}
+
+    except Exception as e:
+        logging.getLogger(__name__).exception("Worker failed for %s", label)
+        return {"run": run_i, "label": label, **param_dict, "status": f"error: {e}"}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Summary CSV
 # ─────────────────────────────────────────────────────────────────────────────
@@ -219,66 +246,63 @@ def run_one(cfg: dict, run_dir: Path) -> dict:
 def save_summary(rows: list[dict], path: Path) -> None:
     if not rows:
         return
-    # Union of all keys so missing fields get empty strings
+    rows = sorted(rows, key=lambda r: r.get("run", 0))
     all_keys = list(dict.fromkeys(k for row in rows for k in row))
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
         w.writeheader()
         for row in rows:
             w.writerow({k: row.get(k, "") for k in all_keys})
-    print(f"\nSummary CSV → {path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sweep
+# Parallel sweep
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_sweep(base_cfg: dict, sweep_cfg: dict, root: Path) -> None:
-    sweep      = sweep_cfg.get("sweep", {})
-    params     = sweep.get("params", {})         # {dotted_key: [values]}
-    eq_branch  = sweep.get("eq_branch", None)    # optional global override
+def run_sweep_parallel(base_cfg: dict, sweep_cfg: dict, root: Path, workers: int, logger: logging.Logger) -> None:
+    sweep = sweep_cfg.get("sweep", {})
+    params = sweep.get("params", {})
+    eq_branch = sweep.get("eq_branch", None)
 
     if not params:
-        raise ValueError("sweep.params is empty — nothing to sweep over.")
+        raise ValueError("sweep.params is empty - nothing to sweep over.")
 
-    # Build all combinations
-    param_keys   = list(params.keys())
-    param_values = list(params.values())
-    combinations = list(product(*param_values))
-
+    param_keys = list(params.keys())
+    combinations = list(product(*params.values()))
     total = len(combinations)
-    print(f"Sweep '{sweep.get('name', 'unnamed')}': "
-          f"{total} run(s) over {param_keys}")
-    print(f"Output root: {root}\n")
 
-    summary_rows: list[dict] = []
-
+    jobs = []
     for i, combo in enumerate(combinations, start=1):
         param_dict = dict(zip(param_keys, combo))
-
-        # Override eq_branch if specified at sweep level
         if eq_branch is not None:
             param_dict["simulation.eq_branch"] = eq_branch
+        jobs.append((i, param_dict, base_cfg, sweep_cfg, str(root)))
 
-        label   = run_label(param_dict, sweep_cfg)
-        run_dir = root / label
-        run_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Sweep '%s': %s run(s) over %s", sweep.get("name", "unnamed"), total, param_keys)
+    logger.info("Output root: %s", root)
+    logger.info("Workers: %s", workers)
 
-        print(f"[{i:>{len(str(total))}}/{total}]  {label}")
+    rows: list[dict] = []
+    completed = 0
+    ok = 0
 
-        cfg     = apply_params(base_cfg, param_dict)
-        results = run_one(cfg, run_dir)
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(worker, job) for job in jobs]
+        for fut in as_completed(futures):
+            row = fut.result()
+            rows.append(row)
+            completed += 1
+            if row.get("status") == "ok":
+                ok += 1
+                logger.info("[%s/%s] ok | %s | biomass_mean=%.4f | elapsed_s=%s",
+                            completed, total, row["label"], row.get("biomass_mean", float("nan")), row.get("elapsed_s"))
+            else:
+                logger.warning("[%s/%s] %s | %s", completed, total, row.get("status"), row["label"])
 
-        row = {"run": i, "label": label, **param_dict, **results}
-        summary_rows.append(row)
-
-        status = results.get("status", "?")
-        if status == "ok":
-            print(f"    done in {results['elapsed_s']:.1f}s  "
-                  f"biomass_mean={results['biomass_mean']:.4f}")
-
-    save_summary(summary_rows, root / "summary.csv")
-    print(f"\nAll {total} runs complete → {root}")
+    summary_path = root / "summary.csv"
+    save_summary(rows, summary_path)
+    logger.info("Finished: %s/%s ok", ok, total)
+    logger.info("Summary CSV: %s", summary_path)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -288,19 +312,21 @@ def run_sweep(base_cfg: dict, sweep_cfg: dict, root: Path) -> None:
 if __name__ == "__main__":
     # import argparse
     #
-    # parser = argparse.ArgumentParser(description=__doc__,
-    #              formatter_class=argparse.RawDescriptionHelpFormatter)
-    # parser.add_argument("--config", default="configs/extended_model.yaml",
-    #                     help="Base model config (yaml)")
-    # parser.add_argument("--sweep",  default="configs/sweep_cfg.yaml",
-    #                     help="Sweep definition (yaml)")
+    # parser = argparse.ArgumentParser(description="Parallel parameter sweep with logging.")
+    # parser.add_argument("--config", default="configs/extended_model.yaml", help="Base model config YAML")
+    # parser.add_argument("--sweep", default="configs/sweep_cfg.yaml", help="Sweep config YAML")
+    # parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1), help="Number of worker processes")
+    # parser.add_argument("--log-level", default="INFO", help="DEBUG, INFO, WARNING, ERROR")
     # args = parser.parse_args()
     #
     # config_path = Path(args.config)
     # sweep_path  = Path(args.sweep)
 
+    log_path = setup_logging(run_date=None, log_name="sweep.log")
+
     config = Path.joinpath(PROJECT_ROOT, "configs/extended_model.yaml")
     sweep = Path.joinpath(PROJECT_ROOT, "configs/sweep_cfg.yaml")
+    workers = 8
 
     config_path = config
     sweep_path  = sweep
@@ -309,4 +335,4 @@ if __name__ == "__main__":
     sweep_cfg = load_yaml(sweep_path)
 
     root = sweep_root(base_cfg, sweep_cfg, config_path)
-    run_sweep(base_cfg, sweep_cfg, root)
+    run_sweep_parallel(base_cfg, sweep_cfg, root, workers, logger)

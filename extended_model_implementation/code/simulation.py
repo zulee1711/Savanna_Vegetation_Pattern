@@ -1,11 +1,13 @@
 """
 Simulation function 
 """
+import logging
+
+logger = logging.getLogger(__name__)
+
 import numpy as np
-from sympy.abc import alpha
 
 from mesh import Mesh
-from tqdm import tqdm
 
 #%%
 def _rhs_equations(
@@ -115,16 +117,16 @@ def _calculate_rhs(cfg : dict, mesh : Mesh, w : np.ndarray, g : np.ndarray, s : 
     return _rhs_equations(p, w, g, s, b, adv_w, lap_g, lap_s, lap_b)
 
 #%%
-def simulate(cfg : dict, mesh : Mesh, IC : np.ndarray): 
-    """ 
-    Simulation of the system 
+def simulate(cfg : dict, mesh : Mesh, IC : np.ndarray):
+    """
+    Simulation of the system
     """
 
-    # Simulation parameters 
-    T = cfg['simulation'].get('totalTime', 100.0) 
+    # Simulation parameters
+    T = cfg['simulation'].get('totalTime', 100.0)
     dt = cfg['simulation'].get('dt', 0.001)
-    nSteps = int(T / dt) 
-    save_every = cfg['simulation']['save_every'] 
+    nSteps = int(T / dt)
+    save_every = cfg['simulation']['save_every']
 
     # Snapshots
     snapshots_w = []
@@ -134,10 +136,10 @@ def simulate(cfg : dict, mesh : Mesh, IC : np.ndarray):
     times       = []
 
     # Initial conditions
-    w, g, s, b, = IC 
+    w, g, s, b, = IC
 
-    for step in tqdm(range(nSteps + 1), desc= "Simulating"):
-        # print(f"Step = {step} of {nSteps}")
+    for step in range(nSteps + 1):
+        # logger.info(f"Step = {step} of {nSteps}")
 
         state = np.array([w, g, s, b])
 
@@ -148,27 +150,27 @@ def simulate(cfg : dict, mesh : Mesh, IC : np.ndarray):
             snapshots_b.append(b.copy())
             times.append(step * dt)
 
-        # Computing RHS  
+        # Computing RHS
         dw, dg, ds, db = _calculate_rhs(cfg, mesh, w, g, s, b)
 
-        # Euler stepping 
+        # Euler stepping
         w_new = np.clip(w + dw * dt, 0, None)
         g_new = np.clip(g + dg * dt, 0, None)
-        s_new = np.clip(s + ds * dt, 0, None) 
+        s_new = np.clip(s + ds * dt, 0, None)
         b_new = np.clip(b + db * dt, 0, None)
         state_new = np.array([w_new, g_new, s_new, b_new])
 
 
-        # Stopping conditions 
-        if (np.linalg.norm(state_new - state) < 1e-6): 
-            print("Steady state reached at t = ", step * dt)
+        # Stopping conditions
+        if (np.linalg.norm(state_new - state) < 1e-6):
+            logger.info("Steady state reached at t = ", step * dt)
             break
-        elif step == nSteps: 
-            print("Reached max number of steps. Steady satte not reached.")
+        elif step == nSteps:
+            logger.info("Reached max number of steps. Steady state not reached.")
             break
 
-        if np.any(np.isnan(state_new)): 
-            print(f"NaN detected at step {step} (t={step*dt:.3f}). Stopping.")
+        if np.any(np.isnan(state_new)):
+            logger.error(f"NaN detected at step {step} (t={step*dt:.3f}). Stopping.")
             break
     
         w = w_new 
@@ -177,5 +179,3 @@ def simulate(cfg : dict, mesh : Mesh, IC : np.ndarray):
         s = s_new 
 
     return np.array(snapshots_w), np.array(snapshots_g), np.array(snapshots_s), np.array(snapshots_b), np.array(times)
-
-

@@ -1,6 +1,9 @@
 """
-plotting.py — Plotting functions for the extended Klausmeier model
+plotting.py - Plotting functions for the extended Klausmeier model
 """
+import logging
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,7 +32,7 @@ def plot_spacetime_1d(w, g, s, b, times, mesh, cfg, save_path=None):
     arrays = [w, g, s, b]
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
-    fig.suptitle("Extended Klausmeier — 1D space-time", fontsize=12)
+    fig.suptitle("Extended Klausmeier - 1D space-time", fontsize=12)
 
     for ax, data, label, cmap in zip(axes, arrays, _LABELS, _CMAPS):
         im = ax.imshow(
@@ -66,7 +69,7 @@ def plot_snapshot_1d(w, g, s, b, times, mesh, cfg, t_idx=-1, save_path=None):
     t      = times[t_idx]
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 4))
-    fig.suptitle(f"Extended Klausmeier — snapshot at t={t:.2f}", fontsize=12)
+    fig.suptitle(f"Extended Klausmeier - snapshot at t={t:.2f}", fontsize=12)
 
     for ax, data, label, color in zip(axes, arrays, _LABELS, _COLORS):
         ax.plot(mesh.x, data[t_idx], color=color, lw=1.8)
@@ -94,7 +97,7 @@ def animate_1d(w, g, s, b, times, mesh, cfg, save_path=None):
     arrays = [w, g, s, b]
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 4))
-    fig.suptitle("Extended Klausmeier — 1D animation", fontsize=12)
+    fig.suptitle("Extended Klausmeier - 1D animation", fontsize=12)
 
     lines = []
     for ax, data, label, color in zip(axes, arrays, _LABELS, _COLORS):
@@ -120,7 +123,7 @@ def animate_1d(w, g, s, b, times, mesh, cfg, save_path=None):
 
     if save_path:
         ani.save(save_path, writer="pillow", fps=25)
-        print(f"Saved animation → {save_path}")
+        logger.info(f"Saved animation -> {save_path}")
     else:
         plt.show()
     plt.close(fig)
@@ -130,7 +133,7 @@ def _save_or_show(fig, save_path, default_name):
     """Saves figure if path given, otherwise shows it."""
     if save_path:
         fig.savefig(Path(save_path), dpi=150)
-        print(f"Saved → {save_path}")
+        logger.info(f"Saved -> {save_path}")
     else:
         plt.show()
     plt.close(fig)
@@ -153,13 +156,13 @@ def plot_snapshot_2d(w, g, s, b, times, mesh, cfg, t_idx=-1, save_path=None):
     Lx, Ly = cfg['mesh']['Lx'], cfg['mesh']['Ly']
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
-    fig.suptitle(f"Extended Klausmeier — 2D snapshot at t={t:.2f}", fontsize=12)
+    fig.suptitle(f"Extended Klausmeier - 2D snapshot at t={t:.2f}", fontsize=12)
 
     # Normalize terrain if available
     h_norm = None
     if mesh.h is not None:
         h_norm = (mesh.h - mesh.h.min()) / (mesh.h.max() - mesh.h.min() + 1e-12)
-    
+
     alpha = 0.3  # Terrain overlay transparency
 
     for ax, data, label, cmap in zip(axes, arrays, _LABELS, _CMAPS):
@@ -171,7 +174,7 @@ def plot_snapshot_2d(w, g, s, b, times, mesh, cfg, t_idx=-1, save_path=None):
             vmin=0,
             vmax=max(np.nanmax(data[t_idx]), 1e-6),
         )
-        
+
         # Overlay terrain if available
         if h_norm is not None:
             ax.imshow(
@@ -181,7 +184,7 @@ def plot_snapshot_2d(w, g, s, b, times, mesh, cfg, t_idx=-1, save_path=None):
                 cmap="Greys",
                 alpha=alpha
             )
-        
+
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_title(label)
@@ -196,7 +199,7 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
     Lx, Ly = cfg['mesh']['Lx'], cfg['mesh']['Ly']
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
-    fig.suptitle("Extended Klausmeier — 2D animation", fontsize=12)
+    fig.suptitle("Extended Klausmeier - 2D animation", fontsize=12)
 
     # Compute fixed color limits across all frames
     vmaxes = [max(np.nanmax(data), 1e-6) for data in arrays]
@@ -205,7 +208,7 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
     h_norm = None
     if mesh.h is not None:
         h_norm = (mesh.h - mesh.h.min()) / (mesh.h.max() - mesh.h.min() + 1e-12)
-    
+
     alpha = 0.3  # Terrain overlay transparency
 
     ims = []
@@ -220,7 +223,7 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
             vmax=vmax,      # ← fixed for entire animation
             animated=True,
         )
-        
+
         # Add terrain overlay if available
         h_im = None
         if h_norm is not None:
@@ -232,7 +235,7 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
                 alpha=alpha,
                 animated=True
             )
-        
+
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_title(label)
@@ -245,7 +248,7 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
     def update(frame):
         for im, data in zip(ims, arrays):
             im.set_data(data[frame])
-            # No set_clim — colormap is fixed
+            # No set_clim - colormap is fixed
         title.set_text(f"t = {times[frame]:.2f}")
         return ims + h_ims + [title]
 
@@ -255,7 +258,7 @@ def animate_2d(w, g, s, b, times, mesh, cfg, save_path=None):
 
     if save_path:
         ani.save(save_path, writer="pillow", fps=25)
-        print(f"Saved animation → {save_path}")
+        logger.info(f"Saved animation -> {save_path}")
     else:
         plt.show()
     plt.close(fig)

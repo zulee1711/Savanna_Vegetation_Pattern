@@ -85,15 +85,3 @@ class Mesh2D(Mesh):
         self.h = h
         self.vx = vx
         self.vy = vy
-
-    
-
-
-
-
-
-
-
-
-
-

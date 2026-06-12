@@ -21,14 +21,14 @@ model:
   m1: 0.45      # Grass mortality 
   d1: 1.0       # Grass diffusion 
   
-  b2: 0.8       # Sapling absorption — slightly less than grass
+  b2: 0.5       # Sapling absorption — slightly less than grass
   m2: 0.3       # Sapling mortality — lower than grass
-  gamma: 0.2    # Sapling to tree conversion rate
+  gamma: 0.15    # Sapling to tree conversion rate
   d2:  0.5       # Sapling diffusion (from tree diffusion term)
-  phi: 0.05     # Sapling spread rate from trees
+  phi: 0.21     # Sapling spread rate from trees
   
-  b3: 0.2       # Tree absorption — less efficient than grass
-  m3:  0.1       # Tree mortality — trees live longer
+  b3: 0.8       # Tree absorption — less efficient than grass
+  m3:  0.5       # Tree mortality — trees live longer
   
   type: extended # extended or klausmeier - just used for initial conditions, sets s0 = b0 = 0 if klausmeier
   # To match OG Klausmeier, use a = 2.0, alpha = 1.0, v = 182.5, b1 = 1.0, m1 = 0.45, d1 = 1.0, everything else to 0.0
@@ -41,7 +41,7 @@ simulation:
   dt: 0.002
   save_every: 100 
   seed: 42 
-  eq_branch: E1+ # E0 (trivial), E1+ (grass only, positive branch), E1- (grass only, negative branch), E2_1/2/3/4 (saplings + trees), E_all (all coexist)
+  eq_branch: E_all # E0 (trivial), E1+ (grass only, positive branch), E1- (grass only, negative branch), E2_1/2/3/4 (saplings + trees), E_all (all coexist)
   perturbation: 0.001 # Size of random perturbation around equilibrium for initial conditions 
 
 output:

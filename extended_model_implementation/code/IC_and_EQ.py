@@ -1,8 +1,12 @@
 """
 Calculates equilibrium points and builds initial conditions 
 """
-import numpy as np 
-from scipy.optimize import fsolve
+import logging
+
+logger = logging.getLogger(__name__)
+
+import numpy as np
+import re
 
 #%%
 def _wn_quadratic(p_star, a, alpha):
@@ -28,12 +32,24 @@ def _det_quadratic_roots(b2, b3, m2, m3, gamma, phi):
     return pos_root, neg_root
 
 #%%
-def _sb_ratio(p_star, b2, m2, gamma, phi):
-    r = (m2 + gamma - b2 * p_star) / phi
-    if r > 0:
-        return r
-    else:
+def _sb_ratio(p_star, b2, b3, m2, m3, gamma, phi):
+    r_from_s = (m2 + gamma - b2 * p_star) / phi
+
+    denom = m3 - b3 * p_star
+    if denom <= 0:
         return np.nan
+
+    r_from_b = gamma / denom
+
+    if not np.isclose(r_from_s, r_from_b, rtol=1e-7, atol=1e-10):
+        logger.warning(
+            "Inconsistent b/s ratio: from S row %.6g, from B row %.6g",
+            r_from_s, r_from_b
+        )
+        return np.nan
+
+    r = 0.5 * (r_from_s + r_from_b)
+    return r if r > 0 else np.nan
 
 #%%
 def _sb_from_ratio_and_n(r, n_star):
@@ -48,7 +64,7 @@ def _eq_E0(p: dict) -> np.ndarray:
     Always exists.
     """
     a = p['a']
-    print(f"E0: w* = {a}")
+    logger.info(f"E0: w* = {a}")
     return np.array([a, 0.0, 0.0, 0.0])
 
 #%%
@@ -62,7 +78,7 @@ def _eq_E1(p: dict) -> tuple:
 
     disc1 = (b1 * a) ** 2 - 4 * alpha * m1 ** 2
     if disc1 < 0:
-        print(f"E1 does not exist: need b1 * a >= 2 * m1 * sqrt(alpha)")
+        logger.error(f"E1 does not exist: need b1 * a >= 2 * m1 * sqrt(alpha)")
         nan4 = np.full(4, np.nan)
         return nan4, nan4
 
@@ -74,12 +90,12 @@ def _eq_E1(p: dict) -> tuple:
 
     E1p = np.array([w_plus, g_plus, 0.0, 0.0])
     E1m = np.array([w_minus, g_minus, 0.0, 0.0])
-    print(f"E1+: w*={w_plus:.4f}, g*={g_plus:.4f}")
-    print(f"E1-: w*={w_minus:.4f}, g*={g_minus:.4f}")
+    logger.info(f"E1+: w*={w_plus:.4f}, g*={g_plus:.4f}")
+    logger.info(f"E1-: w*={w_minus:.4f}, g*={g_minus:.4f}")
     return E1p, E1m
 
 #%%
-def _eq_E2(p: dict) -> np.ndarray:
+def _eq_E2(p: dict):
     """
     E2: Saplings + trees state (g* = 0, s* > 0, b* > 0)
     Calculated analytically. Returns the + branch representative.
@@ -93,14 +109,14 @@ def _eq_E2(p: dict) -> np.ndarray:
     p_plus, p_minus = _det_quadratic_roots(b2, b3, m2, m3, gamma, phi)
 
     if np.isnan(p_plus):
-        print("E2 does not exist: determinant quadratic has no real roots.")
+        logger.error("E2 does not exist: determinant quadratic has no real roots.")
         return np.full(4, np.nan)
 
     found = []
     for p_star, p_branch in [(p_plus, 'p+'), (p_minus, 'p-')]:
         if p_star <= 0:
             continue
-        r = _sb_ratio(p_star, b2, m2, gamma, phi)
+        r = _sb_ratio(p_star, b2, b3, m2, m3, gamma, phi)
         if np.isnan(r):
             continue
 
@@ -113,16 +129,56 @@ def _eq_E2(p: dict) -> np.ndarray:
                 continue
             w_star = a / (1.0 + alpha * n_star ** 2)
             label = f"{p_branch},{n_branch}"
-            print(f"E2 ({label}): w*={w_star:.6g},  s*={s_star:.6g},  "
-                  f"b*={b_star:.6g}  [p*={p_star:.4g}, n*={n_star:.4g}, r={r:.4g}]")
+            logger.info(f"E2 ({label}): w*={w_star:.6g},  s*={s_star:.6g},  "
+                        f"b*={b_star:.6g}  [p*={p_star:.4g}, n*={n_star:.4g}, r={r:.4g}]")
             found.append(np.array([w_star, 0.0, s_star, b_star]))
 
     if not found:
-        print("E2 (saplings+trees) does not exist for these parameters.")
+        logger.warning("E2 (saplings+trees) does not exist for these parameters.")
     return found
 
 #%%
-def _eq_E_all(p: dict) -> np.ndarray:
+def _resolve_family_label(label: str, equilibria: dict, family: str) -> tuple[str, np.ndarray]:
+    """
+    Resolve branch labels like E2, E2_1, E2_2, E_all, E_all_1, E_all_2.
+
+    Rules:
+    - "family" maps to "family_1" when available.
+    - "family_n" uses exact branch if it exists.
+    - If requested branch does not exist, fall back to closest available branch.
+    """
+    if label == family:
+        preferred = f"{family}_1"
+    else:
+        preferred = label
+
+    if preferred in equilibria and np.all(np.isfinite(equilibria[preferred])):
+        return preferred, equilibria[preferred]
+
+    m = re.fullmatch(rf"{re.escape(family)}_(\d+)", preferred)
+    if m is None:
+        logger.error("Unknown equilibrium branch '%s'.", label)
+        raise KeyError(f"Unknown equilibrium branch '{label}'.")
+
+    target = int(m.group(1))
+    candidates: list[tuple[int, str, np.ndarray]] = []
+
+    for key, eq in equilibria.items():
+        m_key = re.fullmatch(rf"{re.escape(family)}_(\d+)", key)
+        if m_key is None or not np.all(np.isfinite(eq)):
+            continue
+        branch_num = int(m_key.group(1))
+        candidates.append((abs(branch_num - target), key, eq))
+
+    if not candidates:
+        logger.error("Equilibrium '%s' does not exist for these parameters.", label)
+        raise ValueError(f"Equilibrium '{label}' does not exist for these parameters.")
+
+    candidates.sort(key=lambda item: (item[0], int(item[1].split('_')[-1])))
+    return candidates[0][1], candidates[0][2]
+
+#%%
+def _eq_E_all(p: dict) -> list:
     """
     E_all: All species coexistence continuum (g* > 0, s* > 0, b* > 0)
     Returns a representative point exactly in the middle of the valid b* range.
@@ -134,49 +190,85 @@ def _eq_E_all(p: dict) -> np.ndarray:
     gamma = p['gamma']
     phi = p['phi']
 
+    found = []
+
+    if b1 == 0:
+        logger.warning("E_all does not exist: b1 = 0, so p* = m1/b1 is undefined.")
+        return found
+
     # p* fixed by grass
     p_star = m1 / b1
+
+    if p_star <= 0:
+        logger.warning(
+            "E_all does not exist: need p* = m1/b1 > 0, got p* = %.6g",
+            p_star,
+        )
+        return found
 
     # Compatibility condition
     det_val = (b2 * p_star - (m2 + gamma)) * (b3 * p_star - m3) - phi * gamma
     if abs(det_val) > 1e-8:
-        print(f"E_all does not exist: compatibility not satisfied  "
-              f"(det = {det_val:+.6g} != 0 at p* = m1/b1 = {p_star:.4g})")
-        return np.full(4, np.nan)
+        logger.warning(
+            "E_all does not exist: compatibility not satisfied "
+            "(det = %+ .6g != 0 at p* = m1/b1 = %.6g)",
+            det_val,
+            p_star,
+        )
+        return found
 
-    # Existence condition for r > 0: b_3 * p* < m3
-    if b3 * p_star >= m3:
-        print(f"E_all does not exist: need b_3 * p* < m3"
-              f"(b_3 * p* = {b3 * p_star:.4g} >= m3 = {m3:.4g})")
-        return np.full(4, np.nan)
-
-    # Ratio r = b*/s* from row (S)
+    # Ratio r = b*/s*
     r = _sb_ratio(p_star, b2, b3, m2, m3, gamma, phi)
     if np.isnan(r):
-        print("E_all does not exist: r = b*/s* <= 0")
-        return np.full(4, np.nan)
+        logger.warning("E_all does not exist: invalid or nonpositive r = b*/s*.")
+        return found
 
-    # n* from water quadratic
-    n_star, _ = _wn_quadratic(p_star, a, alpha)
-    if np.isnan(n_star):
-        print(f"E_all does not exist: a < 2p*√α  "
-              f"(a = {a:.4g},  2p*√α = {2 * p_star * np.sqrt(alpha):.4g})")
-        return np.full(4, np.nan)
+    # Water equation:
+    # p* = a n* / (1 + alpha n*^2)
+    n_plus, n_minus = _wn_quadratic(p_star, a, alpha)
 
-    # Valid s range: 0 < s < s_max = n*/(1+r)
-    s_max = n_star / (1.0 + r)
+    for n_star, n_branch in [(n_plus, "n+"), (n_minus, "n-")]:
+        if np.isnan(n_star) or n_star <= 0:
+            continue
 
-    # Representative point at midpoint of valid range
-    s_rep = s_max / 2.0
-    b_rep = r * s_rep
-    g_rep = n_star - s_rep * (1.0 + r)  # = n* - s_max = s_max > 0 by construction
-    w_star = a / (1.0 + alpha * n_star ** 2)
+        # Valid continuum:
+        # 0 < s* < n*/(1+r)
+        # b* = r s*
+        # g* = n* - s*(1+r)
+        s_max = n_star / (1.0 + r)
 
-    print(f"E_all (all-species, CONTINUUM): w* = {w_star:.6g},  n* = {n_star:.6g},  "
-          f"r = b/s = {r:.4g},  s ∈ (0, {s_max:.4g})")
-    print(f"  Representative (s = s_max/2): "
-          f"g* = {g_rep:.6g},  s* = {s_rep:.6g},  b* = {b_rep:.6g}")
-    return np.array([w_star, g_rep, s_rep, b_rep])
+        if s_max <= 0:
+            continue
+
+        # Representative point in the middle of the valid interval
+        s_rep = 0.5 * s_max
+        b_rep = r * s_rep
+        g_rep = n_star - s_rep * (1.0 + r)
+        w_star = a / (1.0 + alpha * n_star ** 2)
+
+        if w_star <= 0 or g_rep <= 0 or s_rep <= 0 or b_rep <= 0:
+            continue
+
+        logger.info(
+            "E_all (%s): w*=%.6g, g*=%.6g, s*=%.6g, b*=%.6g "
+            "[p*=%.6g, n*=%.6g, r=b/s=%.6g, s in (0, %.6g)]",
+            n_branch,
+            w_star,
+            g_rep,
+            s_rep,
+            b_rep,
+            p_star,
+            n_star,
+            r,
+            s_max,
+        )
+
+        found.append(np.array([w_star, g_rep, s_rep, b_rep]))
+
+    if not found:
+        logger.warning("E_all does not exist: no valid positive water-root branch.")
+
+    return found
 
 #%%
 def calculate_eq(cfg: dict) -> dict:
@@ -193,11 +285,25 @@ def calculate_eq(cfg: dict) -> dict:
 
     equilibria['E0'] = _eq_E0(p)
     equilibria['E1+'], equilibria['E1-'] = _eq_E1(p)
-    for i, eq in enumerate(_eq_E2(p), start=1):
+    e2_list = _eq_E2(p)
+    for i, eq in enumerate(e2_list, start=1):
         equilibria[f'E2_{i}'] = eq
-    if not any(k.startswith('E2') for k in equilibria):
+
+    # Backward-compatible alias: allow simulation.eq_branch = "E2"
+    # and map it to E2_1 when available.
+    equilibria['E2'] = e2_list[0] if e2_list else np.full(4, np.nan)
+
+    if not any(re.fullmatch(r"E2_\d+", k) for k in equilibria):
         equilibria['E2_1'] = np.full(4, np.nan)
-    equilibria['E_all'] = _eq_E_all(p)
+
+    eall_list = _eq_E_all(p)
+    for i, eq in enumerate(eall_list, start=1):
+        equilibria[f'E_all_{i}'] = eq
+
+    equilibria['E_all'] = eall_list[0] if eall_list else np.full(4, np.nan)
+
+    if not any(re.fullmatch(r"E_all_\d+", k) for k in equilibria):
+        equilibria['E_all_1'] = np.full(4, np.nan)
 
     return equilibria
 
@@ -216,25 +322,44 @@ def get_initial_conditions(cfg : dict, equilibria : dict):
         b (np.ndarray): Initial condition - perturbation around b*
     """
     label = cfg['simulation']['eq_branch']
-    eq = equilibria.get(label)
+    label_str = str(label)
+
+    if label_str.startswith("E2"):
+        label, eq = _resolve_family_label(label_str, equilibria, "E2")
+    elif label_str.startswith("E_all"):
+        label, eq = _resolve_family_label(label_str, equilibria, "E_all")
+    else:
+        label, eq = label_str, equilibria.get(label_str)
 
     if eq is None:
+        logger.error("Unknown equilibrium branch '%s'.", label)
         raise KeyError(f"Unknown equilibrium branch '{label}'.")
     if np.any(np.isnan(eq)):
+        logger.error("Equilibrium '%s' does not exist for these parameters.", label)
         raise ValueError(f"Equilibrium '{label}' does not exist for these parameters.")
 
-    if label in ('E3', 'E_all'):
-        raise Warning(f"{label} is a continuum of equilibria.")
+    if not np.all(np.isfinite(eq)):
+        logger.error("Equilibrium '%s' contains non-finite values: %s", label, eq)
+        raise ValueError(f"Equilibrium '{label}' contains non-finite values.")
 
-    print(f"Using initial conditions near {label}: [w,g,s,b] = {eq}")
+    if label.startswith("E_all"):
+        logger.warning(
+            "%s is a representative point from an E_all continuum, "
+            "not an isolated equilibrium.",
+            label,
+        )
+
+    logger.info(f"Using initial conditions near {label}: [w,g,s,b] = {eq}")
 
     w_eq, g_eq, s_eq, b_eq = eq 
 
     dim = cfg['mesh']['dim']
     if dim == 1: 
         shape = (cfg['mesh']['nCells'], )
-    else:  
+    elif dim == 2:
         shape = (cfg['mesh']['nCellsX'], cfg['mesh']['nCellsY'])
+    else:
+        raise ValueError(f"Unsupported mesh dimension: {dim}")
 
     # Peturbing around equilibrium 
     perturb = cfg['simulation'].get('perturbation', 0.01)
@@ -251,7 +376,9 @@ def get_initial_conditions(cfg : dict, equilibria : dict):
         w = w_eq + perturb * rng.standard_normal(shape) 
         g = g_eq + perturb * rng.standard_normal(shape) 
         s = s_eq + perturb * rng.standard_normal(shape) 
-        b = b_eq + perturb * rng.standard_normal(shape) 
+        b = b_eq + perturb * rng.standard_normal(shape)
+    else:
+        raise ValueError(f"Unsupported model type: {cfg['model']['type']}")
 
     # Ensuring all non-negative
     w = np.clip(w, 0.0, None)
