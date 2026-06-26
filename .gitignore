@@ -67,9 +67,7 @@ env/
 venv/
 ENV/
 
-./extended_model_implementation/code/__pycache__/
-
 # Remove if want to upload the outputs to GitHub, but it is generally not recommended.
-./extended_model_implementation/outputs/*
-./runtime/*
+extended_model_implementation/outputs/*
+runtime/*
 
